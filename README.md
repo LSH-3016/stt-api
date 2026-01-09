@@ -15,7 +15,7 @@ cp .env.example .env
 # .env 파일 수정
 
 # 서버 실행
-uvicorn main:app --reload --host 0.0.0.0 --port 8002
+uvicorn main:app --reload --host 0.0.0.0 --port 32100
 ```
 
 ### Docker 실행
@@ -25,7 +25,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8002
 docker build -t stt-service:latest .
 
 # 컨테이너 실행
-docker run -p 8002:8002 --env-file .env stt-service:latest
+docker run -p 32100:32100 --env-file .env stt-service:latest
 ```
 
 ## 📡 API 엔드포인트
@@ -33,12 +33,12 @@ docker run -p 8002:8002 --env-file .env stt-service:latest
 ### 1. 실시간 STT (WebSocket)
 
 ```
-ws://localhost:8002/stt/stream
+ws://localhost:32100/stt/stream
 ```
 
 **JavaScript 예시:**
 ```javascript
-const ws = new WebSocket('ws://localhost:8002/stt/stream');
+const ws = new WebSocket('ws://localhost:32100/stt/stream');
 
 ws.onopen = () => {
   navigator.mediaDevices.getUserMedia({ audio: true })
@@ -63,7 +63,7 @@ ws.onmessage = (event) => {
 ```bash
 POST /stt/transcribe
 
-curl -X POST "http://localhost:8002/stt/transcribe" \
+curl -X POST "http://localhost:32100/stt/transcribe" \
   -F "audio=@voice.wav"
 ```
 
@@ -107,8 +107,8 @@ DEBUG=True
 ## 📚 API 문서
 
 서버 실행 후:
-- Swagger UI: http://localhost:8002/docs
-- ReDoc: http://localhost:8002/redoc
+- Swagger UI: http://localhost:32100/docs
+- ReDoc: http://localhost:32100/redoc
 
 **프로덕션:**
 - Swagger UI: https://stt.aws11.shop/docs

@@ -28,4 +28,4 @@ spec:
           service:
             name: stt-api-service
             port:
-              number: 8002
+              number: 32100

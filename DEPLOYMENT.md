@@ -288,7 +288,7 @@ kubectl logs -l app=stt-api --tail=50
 ## 주요 설정
 
 - **도메인**: stt.aws11.shop
-- **포트**: 8002
+- **포트**: 32100
 - **Replicas**: 2
 - **리소스**:
   - Requests: 512Mi / 500m

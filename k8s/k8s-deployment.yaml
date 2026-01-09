@@ -20,7 +20,7 @@ spec:
       - name: stt-api
         image: 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:latest
         ports:
-        - containerPort: 8002
+        - containerPort: 32100
         env:
         - name: AWS_REGION
           value: "us-east-1"
@@ -33,13 +33,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: 8002
+            port: 32100
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /health
-            port: 8002
+            port: 32100
           initialDelaySeconds: 5
           periodSeconds: 5
         resources:
@@ -63,9 +63,9 @@ spec:
     app: stt-api
   ports:
     - protocol: TCP
-      port: 8002
-      targetPort: 8002
-      nodePort: 32002
+      port: 32100
+      targetPort: 32100
+      nodePort: 32100
   type: NodePort
 ---
 apiVersion: v1
