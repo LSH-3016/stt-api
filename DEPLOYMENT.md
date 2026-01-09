@@ -1,0 +1,277 @@
+# STT Service EKS 배포 가이드
+
+## 사전 준비
+
+### 1. AWS 리소스 생성
+
+#### IAM Role 생성 (stt-api-secrets-role)
+```bash
+# Trust Policy 생성
+cat > trust-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::324547056370:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/YOUR_OIDC_ID"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.us-east-1.amazonaws.com/id/YOUR_OIDC_ID:sub": "system:serviceaccount:default:stt-api-sa"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+# IAM Role 생성
+aws iam create-role \
+  --role-name stt-api-secrets-role \
+  --assume-role-policy-document file://trust-policy.json
+
+# Bedrock 권한 추가
+aws iam attach-role-policy \
+  --role-name stt-api-secrets-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+```
+
+#### ECR 저장소 생성
+```bash
+aws ecr create-repository \
+  --repository-name stt-api \
+  --region us-east-1
+```
+
+### 2. Docker 이미지 빌드 및 푸시
+
+```bash
+# ECR 로그인
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 324547056370.dkr.ecr.us-east-1.amazonaws.com
+
+# 이미지 빌드
+docker build -t stt-api:latest .
+
+# 이미지 태그
+docker tag stt-api:latest 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:latest
+
+# 이미지 푸시
+docker push 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:latest
+```
+
+### 3. Route53 DNS 설정
+
+```bash
+# stt.aws11.shop 도메인을 ALB에 연결
+# Route53 콘솔에서 A 레코드 생성:
+# - 이름: stt.aws11.shop
+# - 타입: A - IPv4 address
+# - 별칭: Yes
+# - 별칭 대상: fproject-alb (기존 ALB)
+```
+
+## 배포 방법
+
+### 방법 1: ArgoCD 사용 (권장)
+
+1. **GitHub 저장소 설정**
+   ```bash
+   # argocd-application.yaml에서 repoURL 수정
+   # repoURL: https://github.com/YOUR_USERNAME/stt-service.git
+   ```
+
+2. **ArgoCD Application 생성**
+   ```bash
+   kubectl apply -f argocd-application.yaml
+   ```
+
+3. **ArgoCD UI에서 확인**
+   ```bash
+   # ArgoCD UI 접속
+   # https://argocd.your-domain.com
+   
+   # 또는 CLI로 확인
+   argocd app get stt-api
+   argocd app sync stt-api
+   ```
+
+### 방법 2: kubectl 직접 배포
+
+```bash
+# Deployment, Service, ServiceAccount 배포
+kubectl apply -f k8s/k8s-deployment.yaml
+
+# Ingress 배포
+kubectl apply -f k8s/k8s-ingress.yaml
+
+# 배포 상태 확인
+kubectl get pods -l app=stt-api
+kubectl get svc stt-api-service
+kubectl get ingress stt-api-ingress
+```
+
+## 배포 확인
+
+### 1. Pod 상태 확인
+```bash
+kubectl get pods -l app=stt-api
+kubectl logs -l app=stt-api --tail=100
+```
+
+### 2. Service 확인
+```bash
+kubectl get svc stt-api-service
+kubectl describe svc stt-api-service
+```
+
+### 3. Ingress 확인
+```bash
+kubectl get ingress stt-api-ingress
+kubectl describe ingress stt-api-ingress
+```
+
+### 4. Health Check
+```bash
+# 로컬 테스트
+curl https://stt.aws11.shop/health
+
+# 예상 응답:
+# {
+#   "status": "healthy",
+#   "service": "stt",
+#   "model": "amazon.nova-2-sonic-v1:0",
+#   "streaming": "enabled",
+#   "max_file_size_mb": 5,
+#   "rate_limit": "10/minute"
+# }
+```
+
+### 5. API 테스트
+```bash
+# STT API 테스트
+curl -X POST "https://stt.aws11.shop/stt/transcribe" \
+  -H "Content-Type: multipart/form-data" \
+  -F "audio=@test.wav"
+```
+
+## 업데이트 배포
+
+### 새 버전 배포
+```bash
+# 1. 새 이미지 빌드 및 푸시
+docker build -t stt-api:v2 .
+docker tag stt-api:v2 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v2
+docker push 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v2
+
+# 2. Deployment 이미지 업데이트
+kubectl set image deployment/stt-api stt-api=324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v2
+
+# 3. 롤아웃 상태 확인
+kubectl rollout status deployment/stt-api
+
+# 4. 롤백 (필요시)
+kubectl rollout undo deployment/stt-api
+```
+
+## 스케일링
+
+### 수동 스케일링
+```bash
+# Pod 개수 조정
+kubectl scale deployment stt-api --replicas=3
+```
+
+### 자동 스케일링 (HPA)
+```bash
+# HPA 생성
+kubectl autoscale deployment stt-api \
+  --cpu-percent=70 \
+  --min=2 \
+  --max=10
+
+# HPA 상태 확인
+kubectl get hpa
+```
+
+## 모니터링
+
+### 로그 확인
+```bash
+# 실시간 로그
+kubectl logs -f -l app=stt-api
+
+# 특정 Pod 로그
+kubectl logs <pod-name>
+
+# 이전 컨테이너 로그
+kubectl logs <pod-name> --previous
+```
+
+### 리소스 사용량
+```bash
+# Pod 리소스 사용량
+kubectl top pods -l app=stt-api
+
+# Node 리소스 사용량
+kubectl top nodes
+```
+
+## 트러블슈팅
+
+### Pod가 시작되지 않을 때
+```bash
+# Pod 상태 확인
+kubectl describe pod <pod-name>
+
+# 이벤트 확인
+kubectl get events --sort-by='.lastTimestamp'
+
+# ServiceAccount 권한 확인
+kubectl describe sa stt-api-sa
+```
+
+### Ingress가 작동하지 않을 때
+```bash
+# Ingress 상태 확인
+kubectl describe ingress stt-api-ingress
+
+# ALB Controller 로그 확인
+kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+
+# ALB 생성 확인
+aws elbv2 describe-load-balancers --region us-east-1
+```
+
+### 503 에러 발생 시
+```bash
+# Target Group 상태 확인
+aws elbv2 describe-target-health \
+  --target-group-arn <target-group-arn>
+
+# Pod Health Check 확인
+kubectl get pods -l app=stt-api
+kubectl logs -l app=stt-api --tail=50
+```
+
+## 주요 설정
+
+- **도메인**: stt.aws11.shop
+- **포트**: 8002
+- **Replicas**: 2
+- **리소스**:
+  - Requests: 512Mi / 500m
+  - Limits: 1Gi / 1000m
+- **Rate Limit**: 10/minute
+- **Max File Size**: 5MB
+- **Health Check**: /health
+- **ALB Group**: fproject-alb (journal-api와 공유)
+
+## 참고사항
+
+1. **ALB 공유**: journal-api와 동일한 ALB(fproject-alb)를 사용하여 비용 절감
+2. **HTTPS**: ACM 인증서를 통한 자동 HTTPS 적용
+3. **Auto Scaling**: CPU 70% 기준으로 2-10개 Pod 자동 조정 가능
+4. **Rolling Update**: 무중단 배포 지원
+5. **Health Check**: Liveness/Readiness Probe로 자동 복구

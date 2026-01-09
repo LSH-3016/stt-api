@@ -1,0 +1,66 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stt-api
+  namespace: argocd
+  # Finalizer를 추가하여 Application 삭제 시 리소스도 삭제
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # 프로젝트 지정
+  project: default
+
+  # 소스 저장소 설정
+  source:
+    # Git 저장소 URL (실제 저장소 URL로 변경 필요)
+    repoURL: https://github.com/YOUR_USERNAME/stt-service.git
+    targetRevision: main
+    # k8s 매니페스트 경로 설정 (모든 yaml 파일 포함)
+    path: k8s
+
+  # 배포 대상 클러스터 설정
+  destination:
+    # 클러스터 URL (in-cluster는 ArgoCD가 설치된 클러스터를 의미)
+    server: https://kubernetes.default.svc
+    # 배포할 네임스페이스
+    namespace: default
+
+  # 동기화 정책
+  syncPolicy:
+    # 자동 동기화 활성화
+    automated:
+      # Git 변경 시 자동으로 배포
+      prune: true
+      # 리소스가 Out of Sync 상태일 때 자동 복구
+      selfHeal: true
+      # 리소스 삭제 허용
+      allowEmpty: false
+
+    # 동기화 옵션
+    syncOptions:
+      # 리소스 생성 전 검증
+      - Validate=true
+      # 네임스페이스 생성 사용
+      - CreateNamespace=false
+      # PruneLast: 삭제 작업을 마지막에 실행
+      - PruneLast=true
+
+    # 재시도 정책
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # 무시할 차이점 설정
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    # aws-load-balancer-controller는 ArgoCD가 관리하지 않음
+    - group: ""
+      kind: ServiceAccount
+      name: aws-load-balancer-controller
+      namespace: kube-system
