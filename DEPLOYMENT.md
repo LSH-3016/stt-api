@@ -2,7 +2,20 @@
 
 ## 사전 준비
 
-### 1. AWS 리소스 생성
+### 1. GitHub Secrets 설정
+
+GitHub 저장소의 Settings > Secrets and variables > Actions에서 다음 Secrets를 추가:
+
+```
+AWS_ACCESS_KEY_ID: <AWS Access Key>
+AWS_SECRET_ACCESS_KEY: <AWS Secret Key>
+```
+
+**권한 요구사항:**
+- ECR: `ecr:GetAuthorizationToken`, `ecr:BatchCheckLayerAvailability`, `ecr:PutImage`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`
+- 또는 간단하게: `AmazonEC2ContainerRegistryPowerUser` 정책 연결
+
+### 2. AWS 리소스 생성
 
 #### IAM Role 생성 (stt-api-secrets-role)
 ```bash
@@ -46,6 +59,23 @@ aws ecr create-repository \
 ```
 
 ### 2. Docker 이미지 빌드 및 푸시
+
+#### 자동 배포 (GitHub Actions - 권장)
+
+```bash
+# main 브랜치에 푸시하면 자동으로 ECR에 배포됨
+git add .
+git commit -m "feat: add new feature"
+git push origin main
+
+# GitHub Actions에서 자동으로:
+# 1. Docker 이미지 빌드
+# 2. ECR에 푸시 (v{run_number}, latest 태그)
+# 3. k8s/k8s-deployment.yaml 이미지 태그 업데이트
+# 4. ArgoCD가 자동으로 EKS에 배포
+```
+
+#### 수동 배포 (로컬)
 
 ```bash
 # ECR 로그인

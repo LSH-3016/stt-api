@@ -1,0 +1,105 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+# GitHub Actions에 필요한 권한 부여
+permissions:
+  contents: write
+  packages: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: stt-api
+
+jobs:
+  build:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: v${{ github.run_number }}
+      run: |
+        # Docker 이미지 빌드
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+
+        # latest 태그 추가
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+        # ECR에 푸시
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+        echo "✅ Built and pushed: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        echo "🏷️ Image also tagged as: latest"
+
+    - name: Update image tag in manifest
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: v${{ github.run_number }}
+      run: |
+        # k8s manifest 파일의 이미지 태그 업데이트
+        if [ -f k8s/k8s-deployment.yaml ]; then
+          sed -i "s|image: .*/stt-api:.*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|g" k8s/k8s-deployment.yaml
+          echo "✅ Updated k8s/k8s-deployment.yaml with new image tag: $IMAGE_TAG"
+          cat k8s/k8s-deployment.yaml | grep "image:"
+        fi
+
+    - name: Commit and push updated manifest
+      env:
+        IMAGE_TAG: v${{ github.run_number }}
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+        if [ -f k8s/k8s-deployment.yaml ]; then
+          git add k8s/k8s-deployment.yaml
+
+          # 변경사항이 있는지 확인
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            git commit -m "chore: update image tag to $IMAGE_TAG [skip ci]"
+
+            # GITHUB_TOKEN을 사용하여 푸시
+            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:${{ github.ref }}
+            echo "✅ Pushed updated manifest to repository"
+          fi
+        else
+          echo "⚠️ k8s/k8s-deployment.yaml not found, skipping manifest update"
+        fi
+
+    - name: Summary
+      run: |
+        echo "### 🚀 Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: ${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:v${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tags**: v${{ github.run_number }}, latest" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Image pushed to ECR successfully" >> $GITHUB_STEP_SUMMARY
+        echo "🔄 ArgoCD will automatically deploy this image to EKS" >> $GITHUB_STEP_SUMMARY
