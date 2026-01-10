@@ -250,6 +250,37 @@ kubectl top nodes
 
 ## 트러블슈팅
 
+### CrashLoopBackOff 오류 (Exit Code 1)
+```bash
+# 1. Pod 로그 확인
+kubectl logs -l app=stt-api --tail=100
+kubectl logs <pod-name> --previous  # 이전 컨테이너 로그
+
+# 2. IAM Role 권한 확인
+aws iam get-role --role-name stt-api-secrets-role
+aws iam list-attached-role-policies --role-name stt-api-secrets-role
+
+# 3. ServiceAccount 확인
+kubectl describe sa stt-api-sa
+# annotations에 eks.amazonaws.com/role-arn이 올바른지 확인
+
+# 4. OIDC Provider 확인
+aws eks describe-cluster --name <cluster-name> --query "cluster.identity.oidc.issuer"
+
+# 5. Bedrock 권한 테스트 (Pod 내부에서)
+kubectl exec -it <pod-name> -- python3 -c "
+import boto3
+client = boto3.client('bedrock-runtime', region_name='us-east-1')
+print('Bedrock client initialized successfully')
+"
+
+# 일반적인 원인:
+# - IAM Role의 Trust Policy가 잘못됨 (OIDC Provider ID 불일치)
+# - Bedrock 권한이 없음 (AmazonBedrockFullAccess 필요)
+# - ServiceAccount annotation이 잘못됨
+# - AWS Region이 Bedrock을 지원하지 않음 (us-east-1 권장)
+```
+
 ### Pod가 시작되지 않을 때
 ```bash
 # Pod 상태 확인

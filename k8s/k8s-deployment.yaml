@@ -36,12 +36,16 @@ spec:
             port: 32100
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /health
             port: 32100
-          initialDelaySeconds: 5
+          initialDelaySeconds: 15
           periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
         resources:
           requests:
             memory: "256Mi"

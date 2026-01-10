@@ -9,11 +9,23 @@ logger = logging.getLogger(__name__)
 
 class STTService:
     def __init__(self):
-        self.client = boto3.client(
-            'bedrock-runtime',
-            region_name=os.getenv('AWS_REGION', 'us-east-1')
-        )
         self.model_id = "amazon.nova-2-sonic-v1:0"
+        self._client = None
+    
+    @property
+    def client(self):
+        """Lazy initialization of boto3 client"""
+        if self._client is None:
+            try:
+                self._client = boto3.client(
+                    'bedrock-runtime',
+                    region_name=os.getenv('AWS_REGION', 'us-east-1')
+                )
+                logger.info("Bedrock client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize Bedrock client: {e}")
+                raise
+        return self._client
     
     async def transcribe_stream(self, audio_stream: AsyncIterator[bytes]) -> AsyncIterator[dict]:
         """
