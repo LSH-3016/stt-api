@@ -16,6 +16,9 @@ metadata:
     alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
     # 기존 ALB 그룹에 추가 - fproject-alb에 자동으로 추가됨
     alb.ingress.kubernetes.io/group.name: fproject-alb
+    # WebSocket 지원 설정
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
+    alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=86400
 spec:
   ingressClassName: alb
   rules:
