@@ -31,4 +31,4 @@ spec:
           service:
             name: stt-api-service
             port:
-              number: 32100
+              number: 8000

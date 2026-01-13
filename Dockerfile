@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 포트 노출
-EXPOSE 32100
+EXPOSE 8000
 
 # 애플리케이션 실행
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "32100"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

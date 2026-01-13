@@ -20,7 +20,7 @@ spec:
       - name: stt-api
         image: 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v14
         ports:
-        - containerPort: 32100
+        - containerPort: 8000
         env:
         - name: AWS_REGION
           value: "us-east-1"
@@ -33,7 +33,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /health
-            port: 32100
+            port: 8000
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
@@ -41,7 +41,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /health
-            port: 32100
+            port: 8000
           initialDelaySeconds: 15
           periodSeconds: 5
           timeoutSeconds: 3
@@ -64,8 +64,8 @@ spec:
     app: stt-api
   ports:
     - protocol: TCP
-      port: 32100
-      targetPort: 32100
+      port: 8000
+      targetPort: 8000
   type: ClusterIP
 ---
 apiVersion: v1
