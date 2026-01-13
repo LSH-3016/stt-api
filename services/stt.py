@@ -4,91 +4,102 @@ import os
 import logging
 import asyncio
 import uuid
-from typing import AsyncIterator
+from amazon_transcribe.client import TranscribeStreamingClient
+from amazon_transcribe.handlers import TranscriptResultStreamHandler
+from amazon_transcribe.model import TranscriptEvent
 
 logger = logging.getLogger(__name__)
 
+class TranscriptHandler(TranscriptResultStreamHandler):
+    """Transcribe 스트리밍 결과 핸들러"""
+    def __init__(self, stream):
+        super().__init__(stream)
+        self.transcript_text = ""
+    
+    async def handle_transcript_event(self, transcript_event: TranscriptEvent):
+        results = transcript_event.transcript.results
+        for result in results:
+            if not result.is_partial:
+                for alt in result.alternatives:
+                    self.transcript_text += alt.transcript + " "
+
 class STTService:
     def __init__(self):
-        self._transcribe_client = None
-        self._s3_client = None
-        self.bucket_name = os.getenv('S3_BUCKET_NAME', 'stt-audio-324547056370')
         self.region = os.getenv('AWS_REGION', 'us-east-1')
-    
-    @property
-    def transcribe_client(self):
-        """Lazy initialization of Transcribe client"""
-        if self._transcribe_client is None:
-            try:
-                self._transcribe_client = boto3.client(
-                    'transcribe',
-                    region_name=self.region
-                )
-                logger.info("Transcribe client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize Transcribe client: {e}")
-                raise
-        return self._transcribe_client
+        self._s3_client = None
+        self._transcribe_client = None
+        self.bucket_name = os.getenv('S3_BUCKET_NAME', 'stt-audio-324547056370')
     
     @property
     def s3_client(self):
-        """Lazy initialization of S3 client"""
         if self._s3_client is None:
-            try:
-                self._s3_client = boto3.client(
-                    's3',
-                    region_name=self.region
-                )
-                logger.info("S3 client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize S3 client: {e}")
-                raise
+            self._s3_client = boto3.client('s3', region_name=self.region)
         return self._s3_client
+    
+    @property
+    def transcribe_client(self):
+        if self._transcribe_client is None:
+            self._transcribe_client = boto3.client('transcribe', region_name=self.region)
+        return self._transcribe_client
 
     async def transcribe_audio(self, audio_data: bytes, content_type: str = "audio/wav") -> dict:
         """
-        음성 파일을 텍스트로 변환합니다 (Amazon Transcribe 사용).
-        
-        Args:
-            audio_data: 음성 파일 바이트 데이터
-            content_type: 오디오 파일 타입
+        음성 데이터를 텍스트로 변환 (Transcribe Streaming 사용)
+        """
+        try:
+            client = TranscribeStreamingClient(region=self.region)
             
-        Returns:
-            dict: {"text": "변환된 텍스트", "language": "ko-KR"}
+            stream = await client.start_stream_transcription(
+                language_code="ko-KR",
+                media_sample_rate_hz=16000,
+                media_encoding="pcm",
+            )
+            
+            handler = TranscriptHandler(stream.output_stream)
+            
+            # 오디오 데이터 전송
+            await stream.input_stream.send_audio_event(audio_chunk=audio_data)
+            await stream.input_stream.end_stream()
+            
+            # 결과 처리
+            await handler.handle_events()
+            
+            return {
+                "text": handler.transcript_text.strip(),
+                "language": "ko-KR"
+            }
+            
+        except Exception as e:
+            logger.error(f"STT 변환 실패: {e}")
+            raise Exception(f"음성 변환 중 오류가 발생했습니다: {str(e)}")
+
+    async def transcribe_file(self, audio_data: bytes, content_type: str = "audio/wav") -> dict:
+        """
+        음성 파일을 텍스트로 변환 (배치 Transcribe - 파일 업로드용)
         """
         job_name = f"stt-job-{uuid.uuid4().hex[:8]}"
         
-        # content_type에서 확장자 결정
         ext_map = {
-            "audio/wav": "wav",
-            "audio/x-wav": "wav",
-            "audio/mp3": "mp3",
-            "audio/mpeg": "mp3",
-            "audio/ogg": "ogg",
-            "audio/flac": "flac",
-            "audio/m4a": "mp4",
-            "audio/mp4": "mp4",
-            "audio/webm": "webm",
-            "audio/pcm": "wav"
+            "audio/wav": "wav", "audio/x-wav": "wav",
+            "audio/mp3": "mp3", "audio/mpeg": "mp3",
+            "audio/ogg": "ogg", "audio/flac": "flac",
+            "audio/m4a": "mp4", "audio/mp4": "mp4",
+            "audio/webm": "webm"
         }
         media_format = ext_map.get(content_type, "wav")
         s3_key = f"audio/{job_name}.{media_format}"
         
         try:
-            # S3에 오디오 파일 업로드
-            logger.info(f"S3 업로드 시작: {s3_key}")
+            # S3 업로드
             await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.s3_client.put_object(
-                    Bucket=self.bucket_name,
-                    Key=s3_key,
-                    Body=audio_data,
-                    ContentType=content_type
+                    Bucket=self.bucket_name, Key=s3_key,
+                    Body=audio_data, ContentType=content_type
                 )
             )
             
             s3_uri = f"s3://{self.bucket_name}/{s3_key}"
-            logger.info(f"S3 업로드 완료: {s3_uri}")
             
             # Transcribe 작업 시작
             await asyncio.get_event_loop().run_in_executor(
@@ -96,49 +107,31 @@ class STTService:
                 lambda: self.transcribe_client.start_transcription_job(
                     TranscriptionJobName=job_name,
                     Media={'MediaFileUri': s3_uri},
-                    MediaFormat=media_format if media_format != "wav" else "wav",
-                    LanguageCode='ko-KR',
-                    Settings={
-                        'ShowSpeakerLabels': False,
-                        'ChannelIdentification': False
-                    }
+                    MediaFormat=media_format,
+                    LanguageCode='ko-KR'
                 )
             )
             
-            logger.info(f"Transcribe 작업 시작: {job_name}")
-            
-            # 작업 완료 대기
+            # 완료 대기
             transcript_text = await self._wait_for_transcription(job_name)
             
-            return {
-                "text": transcript_text,
-                "language": "ko-KR"
-            }
+            return {"text": transcript_text, "language": "ko-KR"}
             
-        except Exception as e:
-            logger.error(f"STT 변환 실패: {e}")
-            raise Exception(f"음성 변환 중 오류가 발생했습니다: {str(e)}")
         finally:
-            # 정리: S3 파일 삭제
+            # 정리
             try:
                 await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.s3_client.delete_object(Bucket=self.bucket_name, Key=s3_key)
+                    None, lambda: self.s3_client.delete_object(Bucket=self.bucket_name, Key=s3_key)
                 )
-            except Exception as e:
-                logger.warning(f"S3 파일 삭제 실패: {e}")
-            
-            # 정리: Transcribe 작업 삭제
-            try:
                 await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.transcribe_client.delete_transcription_job(TranscriptionJobName=job_name)
+                    None, lambda: self.transcribe_client.delete_transcription_job(TranscriptionJobName=job_name)
                 )
-            except Exception as e:
-                logger.warning(f"Transcribe 작업 삭제 실패: {e}")
+            except: pass
 
     async def _wait_for_transcription(self, job_name: str, max_wait: int = 60) -> str:
         """Transcribe 작업 완료 대기"""
+        import urllib.request
+        
         for _ in range(max_wait):
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -149,23 +142,17 @@ class STTService:
             
             if status == 'COMPLETED':
                 transcript_uri = response['TranscriptionJob']['Transcript']['TranscriptFileUri']
-                
-                # 결과 파일 다운로드
-                import urllib.request
                 with urllib.request.urlopen(transcript_uri) as resp:
                     result = json.loads(resp.read().decode())
                     transcripts = result.get('results', {}).get('transcripts', [])
-                    if transcripts:
-                        return transcripts[0].get('transcript', '')
-                    return ''
+                    return transcripts[0].get('transcript', '') if transcripts else ''
                     
             elif status == 'FAILED':
-                failure_reason = response['TranscriptionJob'].get('FailureReason', 'Unknown')
-                raise Exception(f"Transcribe 작업 실패: {failure_reason}")
+                raise Exception(f"Transcribe 실패: {response['TranscriptionJob'].get('FailureReason')}")
             
             await asyncio.sleep(1)
         
-        raise Exception("Transcribe 작업 타임아웃")
+        raise Exception("Transcribe 타임아웃")
 
 # 싱글톤 인스턴스
 stt_service = STTService()
