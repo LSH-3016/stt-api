@@ -9,14 +9,14 @@ Amazon Transcribe Streaming을 사용한 실시간 Speech-to-Text 마이크로�
 ```bash
 pip install -r requirements.txt
 cp .env.example .env
-uvicorn main:app --reload --host 0.0.0.0 --port 32100
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Docker 실행
 
 ```bash
 docker build -t stt-service:latest .
-docker run -p 32100:32100 --env-file .env stt-service:latest
+docker run -p 8000:8000 --env-file .env stt-service:latest
 ```
 
 ## API 엔드포인트
@@ -32,7 +32,7 @@ docker run -p 32100:32100 --env-file .env stt-service:latest
 ## 실시간 STT 사용 예시
 
 ```javascript
-const ws = new WebSocket('wss://stt.aws11.shop/stt/stream');
+const ws = new WebSocket('wss://api.aws11.shop/stt/stream');
 
 ws.onmessage = (event) => {
   const { text, is_final } = JSON.parse(event.data);
@@ -64,7 +64,7 @@ ALLOWED_ORIGINS=*
 git push origin main
 ```
 
-프로덕션 URL: https://stt.aws11.shop
+프로덕션 URL: https://api.aws11.shop/stt
 
 자세한 배포 가이드는 [DEPLOYMENT.md](DEPLOYMENT.md) 참고
 

@@ -94,12 +94,12 @@ docker push 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:latest
 ### 3. Route53 DNS 설정
 
 ```bash
-# stt.aws11.shop 도메인을 ALB에 연결
+# api.aws11.shop 도메인을 ALB에 연결
 # Route53 콘솔에서 A 레코드 생성:
-# - 이름: stt.aws11.shop
+# - 이름: api.aws11.shop
 # - 타입: A - IPv4 address
 # - 별칭: Yes
-# - 별칭 대상: fproject-alb (기존 ALB)
+# - 별칭 대상: one-api-alb (통합 ALB)
 ```
 
 ## 배포 방법
@@ -165,7 +165,7 @@ kubectl describe ingress stt-api-ingress
 ### 4. Health Check
 ```bash
 # 로컬 테스트
-curl https://stt.aws11.shop/health
+curl https://api.aws11.shop/stt/health
 
 # 예상 응답:
 # {
@@ -181,7 +181,7 @@ curl https://stt.aws11.shop/health
 ### 5. API 테스트
 ```bash
 # STT API 테스트
-curl -X POST "https://stt.aws11.shop/stt/transcribe" \
+curl -X POST "https://api.aws11.shop/stt/transcribe" \
   -H "Content-Type: multipart/form-data" \
   -F "audio=@test.wav"
 ```
@@ -318,20 +318,20 @@ kubectl logs -l app=stt-api --tail=50
 
 ## 주요 설정
 
-- **도메인**: stt.aws11.shop
-- **포트**: 32100
+- **도메인**: api.aws11.shop/stt
+- **포트**: 8000
 - **Replicas**: 2
 - **리소스**:
-  - Requests: 512Mi / 500m
-  - Limits: 1Gi / 1000m
+  - Requests: 256Mi / 100m
+  - Limits: 512Mi / 500m
 - **Rate Limit**: 10/minute
 - **Max File Size**: 5MB
 - **Health Check**: /health
-- **ALB Group**: fproject-alb (journal-api와 공유)
+- **ALB Group**: one-api-alb (다른 API와 공유)
 
 ## 참고사항
 
-1. **ALB 공유**: journal-api와 동일한 ALB(fproject-alb)를 사용하여 비용 절감
+1. **ALB 공유**: journal-api와 동일한 ALB(one-api-alb)를 사용하여 비용 절감
 2. **HTTPS**: ACM 인증서를 통한 자동 HTTPS 적용
 3. **Auto Scaling**: CPU 70% 기준으로 2-10개 Pod 자동 조정 가능
 4. **Rolling Update**: 무중단 배포 지원
