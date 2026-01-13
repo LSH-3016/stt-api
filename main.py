@@ -40,7 +40,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "stt-service",
-        "model": "amazon.nova-2-sonic-v1:0"
+        "engine": "amazon-transcribe"
     }
 
 @app.get("/")

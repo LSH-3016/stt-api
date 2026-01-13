@@ -205,7 +205,7 @@ async def stt_health_check():
     return {
         "status": "healthy",
         "service": "stt",
-        "model": "amazon.nova-2-sonic-v1:0",
+        "engine": "amazon-transcribe",
         "streaming": "enabled",
         "max_file_size_mb": 5,
         "rate_limit": "10/minute"
