@@ -14,18 +14,18 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
     alb.ingress.kubernetes.io/healthy-threshold-count: '2'
     alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
-    # 기존 ALB 그룹에 추가 - fproject-alb에 자동으로 추가됨
-    alb.ingress.kubernetes.io/group.name: fproject-alb
+    # 통합 API ALB (다른 서비스도 같은 그룹으로 추가 가능)
+    alb.ingress.kubernetes.io/group.name: one-api-alb
     # WebSocket 지원 설정
     alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
     alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=86400
 spec:
   ingressClassName: alb
   rules:
-  - host: stt.aws11.shop
+  - host: api.aws11.shop
     http:
       paths:
-      - path: /
+      - path: /stt
         pathType: Prefix
         backend:
           service:
