@@ -17,7 +17,7 @@ from amazon_transcribe.model import TranscriptEvent
 from schemas.stt import STTResponse
 from services.stt import stt_service
 
-router = APIRouter(prefix="", tags=["STT (Speech-to-Text)"])
+router = APIRouter(prefix="/stt", tags=["STT (Speech-to-Text)"])
 logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=get_remote_address)
