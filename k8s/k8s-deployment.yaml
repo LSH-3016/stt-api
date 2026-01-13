@@ -18,7 +18,7 @@ spec:
       serviceAccountName: stt-api-sa
       containers:
       - name: stt-api
-        image: 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v12
+        image: 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v13
         ports:
         - containerPort: 32100
         env:
