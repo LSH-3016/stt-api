@@ -10,91 +10,94 @@ import asyncio
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from amazon_transcribe.client import TranscribeStreamingClient
+from amazon_transcribe.handlers import TranscriptResultStreamHandler
+from amazon_transcribe.model import TranscriptEvent
+
 from schemas.stt import STTResponse
 from services.stt import stt_service
 
 router = APIRouter(prefix="/stt", tags=["STT (Speech-to-Text)"])
 logger = logging.getLogger(__name__)
 
-# Rate Limiter 설정 (1분에 10번)
 limiter = Limiter(key_func=get_remote_address)
+
+class WebSocketTranscriptHandler(TranscriptResultStreamHandler):
+    """Transcribe 결과를 WebSocket으로 실시간 전송하는 핸들러"""
+    def __init__(self, stream, websocket: WebSocket):
+        super().__init__(stream)
+        self.websocket = websocket
+        self.full_transcript = ""
+    
+    async def handle_transcript_event(self, transcript_event: TranscriptEvent):
+        results = transcript_event.transcript.results
+        for result in results:
+            for alt in result.alternatives:
+                if result.is_partial:
+                    # 중간 결과 - 바로 전송 (딜레이 최소화)
+                    await self.websocket.send_json({
+                        "text": alt.transcript,
+                        "full_text": self.full_transcript + alt.transcript,
+                        "is_final": False
+                    })
+                else:
+                    # 최종 결과
+                    self.full_transcript += alt.transcript + " "
+                    await self.websocket.send_json({
+                        "text": alt.transcript,
+                        "full_text": self.full_transcript.strip(),
+                        "is_final": True
+                    })
 
 @router.websocket("/stream")
 async def websocket_stt_stream(websocket: WebSocket):
-    """
-    실시간 음성 스트림을 텍스트로 변환합니다 (WebSocket).
-    
-    클라이언트는 음성 데이터를 바이너리로 전송하고,
-    서버는 실시간으로 변환된 텍스트만 JSON으로 반환합니다.
-    
-    **메시지 형식:**
-    - 클라이언트 → 서버: 바이너리 음성 데이터 (PCM 16kHz)
-    - 서버 → 클라이언트: JSON {"text": "...", "full_text": "...", "is_final": false}
-    
-    **연결 예시 (JavaScript):**
-    ```javascript
-    const ws = new WebSocket('ws://localhost:8000/stt/stream');
-    
-    // 음성 데이터 전송
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = (event) => {
-          ws.send(event.data);
-        };
-        mediaRecorder.start(100); // 100ms마다 전송
-      });
-    
-    // 변환된 텍스트만 수신
-    ws.onmessage = (event) => {
-      const result = JSON.parse(event.data);
-      console.log(result.text); // 변환된 텍스트
-    };
-    ```
-    """
+    """실시간 음성 스트림을 텍스트로 변환 (WebSocket + Transcribe Streaming)"""
     await websocket.accept()
     logger.info("WebSocket STT 연결 시작")
     
+    region = os.getenv('AWS_REGION', 'us-east-1')
+    
     try:
-        full_transcript = ""
+        # Transcribe Streaming 클라이언트 생성
+        client = TranscribeStreamingClient(region=region)
         
-        while True:
-            # 클라이언트로부터 음성 데이터 수신
-            audio_chunk = await websocket.receive_bytes()
-            
-            if len(audio_chunk) == 0:
-                continue
-            
-            logger.debug(f"음성 청크 수신: {len(audio_chunk)} bytes")
-            
-            # 실시간 STT 변환만 수행
-            try:
-                result = await stt_service.transcribe_audio(audio_chunk, "audio/pcm")
+        # 스트림 시작
+        stream = await client.start_stream_transcription(
+            language_code="ko-KR",
+            media_sample_rate_hz=16000,
+            media_encoding="pcm",
+        )
+        
+        handler = WebSocketTranscriptHandler(stream.output_stream, websocket)
+        
+        # 결과 처리 태스크 시작
+        handler_task = asyncio.create_task(handler.handle_events())
+        
+        try:
+            while True:
+                # 클라이언트로부터 오디오 청크 수신
+                audio_chunk = await websocket.receive_bytes()
                 
-                if result["text"]:
-                    full_transcript += result["text"] + " "
+                if len(audio_chunk) > 0:
+                    # Transcribe로 오디오 전송
+                    await stream.input_stream.send_audio_event(audio_chunk=audio_chunk)
                     
-                    # 변환된 텍스트만 전송
-                    await websocket.send_json({
-                        "text": result["text"],
-                        "full_text": full_transcript.strip(),
-                        "is_final": False
-                    })
-                    
-            except Exception as e:
-                logger.error(f"STT 처리 오류: {e}")
-                await websocket.send_json({
-                    "error": str(e),
-                    "text": "",
-                    "is_final": False
-                })
+        except WebSocketDisconnect:
+            logger.info("WebSocket 연결 종료")
+        finally:
+            # 스트림 종료
+            await stream.input_stream.end_stream()
+            await handler_task
+            
+            if handler.full_transcript:
+                logger.info(f"최종 변환: {handler.full_transcript}")
                 
-    except WebSocketDisconnect:
-        logger.info("WebSocket STT 연결 종료")
-        if full_transcript:
-            logger.info(f"최종 변환 텍스트: {full_transcript}")
     except Exception as e:
-        logger.error(f"WebSocket 오류: {e}")
+        logger.error(f"STT 스트리밍 오류: {e}")
+        try:
+            await websocket.send_json({"error": str(e), "text": "", "is_final": False})
+        except:
+            pass
         await websocket.close()
 
 @router.post("/transcribe", response_model=STTResponse)
@@ -103,44 +106,22 @@ async def transcribe_audio(
     request: Request,
     audio: UploadFile = File(..., description="음성 파일 (wav, mp3, ogg 등)")
 ):
-    """
-    음성 파일을 텍스트로 변환합니다.
-    
-    - **audio**: 음성 파일 (최대 5MB)
-    - **Rate Limit**: 1분에 10번
-    
-    지원 형식: WAV, MP3, OGG, FLAC, M4A, WEBM
-    """
-    # 파일 크기 제한 (5MB)
+    """음성 파일을 텍스트로 변환"""
     MAX_FILE_SIZE = 5 * 1024 * 1024
-    
-    # 파일 확장자 검증
     allowed_extensions = {'.wav', '.mp3', '.ogg', '.flac', '.m4a', '.webm'}
     file_ext = os.path.splitext(audio.filename or '.wav')[1].lower()
     
     if file_ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=400,
-            detail=f"지원하지 않는 파일 형식입니다. 지원 형식: {', '.join(allowed_extensions)}"
-        )
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식입니다.")
     
-    # 임시 파일로 저장 (메모리 절약)
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
         total_size = 0
-        
         try:
-            # 청크 단위로 읽어서 쓰기 (8KB씩)
             while chunk := await audio.read(8192):
                 total_size += len(chunk)
-                
-                # 파일 크기 체크
                 if total_size > MAX_FILE_SIZE:
                     os.unlink(temp_file.name)
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"파일이 너무 큽니다. 최대 {MAX_FILE_SIZE / 1024 / 1024}MB까지 지원합니다."
-                    )
-                
+                    raise HTTPException(status_code=413, detail="파일이 너무 큽니다.")
                 temp_file.write(chunk)
             
             if total_size == 0:
@@ -148,65 +129,38 @@ async def transcribe_audio(
                 raise HTTPException(status_code=400, detail="빈 파일입니다.")
             
             temp_path = temp_file.name
-        
         except HTTPException:
-            if os.path.exists(temp_file.name):
-                os.unlink(temp_file.name)
             raise
         except Exception as e:
             if os.path.exists(temp_file.name):
                 os.unlink(temp_file.name)
-            logger.error(f"파일 저장 오류: {e}")
-            raise HTTPException(status_code=500, detail=f"파일 처리 중 오류가 발생했습니다: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
     
     try:
-        # Content-Type 결정
         content_type = audio.content_type or "audio/wav"
+        logger.info(f"STT 요청: {audio.filename}, {total_size} bytes")
         
-        logger.info(f"STT 요청 시작: {audio.filename}, {total_size} bytes, {content_type}")
-        
-        # 임시 파일에서 읽어서 STT 변환
         with open(temp_path, 'rb') as f:
             audio_data = f.read()
-            
-            start_time = time.time()
-            
-            # 30초 타임아웃 설정
-            try:
-                result = await asyncio.wait_for(
-                    stt_service.transcribe_audio(audio_data, content_type),
-                    timeout=30.0
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"STT 변환 타임아웃: {audio.filename}")
-                raise HTTPException(
-                    status_code=504,
-                    detail="음성 변환 시간이 초과되었습니다. 더 짧은 파일로 시도해주세요."
-                )
-            
-            elapsed_time = time.time() - start_time
-            logger.info(f"STT 변환 완료: {elapsed_time:.2f}초, 텍스트 길이: {len(result.get('text', ''))}")
+            result = await asyncio.wait_for(
+                stt_service.transcribe_file(audio_data, content_type),
+                timeout=30.0
+            )
         
         return STTResponse(**result)
-        
-    except HTTPException:
-        raise
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="변환 시간 초과")
     except Exception as e:
-        logger.error(f"STT 변환 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # 임시 파일 삭제
         if os.path.exists(temp_path):
             os.unlink(temp_path)
 
 @router.get("/health")
 async def stt_health_check():
-    """STT 서비스 상태 확인"""
     return {
         "status": "healthy",
         "service": "stt",
-        "engine": "amazon-transcribe",
-        "streaming": "enabled",
-        "max_file_size_mb": 5,
-        "rate_limit": "10/minute"
+        "engine": "amazon-transcribe-streaming",
+        "streaming": "enabled"
     }
