@@ -27,7 +27,7 @@ spec:
         - name: AWS_REGION
           value: "ap-northeast-2"
         - name: ALLOWED_ORIGINS
-          value: "https://www.aws11.shop,https://aws11.shop,https://stt.aws11.shop,https://api.aws11.shop"
+          value: "https://www.aws11.shop,https://aws11.shop,https://stt.aws11.shop,https://api.aws11.shop,https://web.aws11.shop"
         - name: DEBUG
           value: "False"
         - name: ENVIRONMENT
