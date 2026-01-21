@@ -24,7 +24,6 @@ docker run -p 8000:8000 --env-file .env stt-service:latest
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
 | `/stt/stream` | WebSocket | 실시간 음성 스트리밍 STT |
-| `/stt/transcribe` | POST | 파일 업로드 STT |
 | `/health` | GET | 서비스 상태 확인 |
 
 자세한 API 문서는 [API.md](API.md) 참고
@@ -50,12 +49,13 @@ ws.send(audioChunk);
 ## 환경변수
 
 ```env
-AWS_REGION=us-east-1
-S3_BUCKET_NAME=stt-audio-324547056370
+AWS_REGION=ap-northeast-2
 ALLOWED_ORIGINS=*
 ```
 
 프로덕션(EKS)에서는 IRSA로 AWS 자격증명 자동 주입
+
+> 실시간 스트리밍만 사용하므로 S3 설정 불필요
 
 ## 배포
 

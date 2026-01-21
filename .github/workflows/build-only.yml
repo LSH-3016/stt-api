@@ -7,7 +7,7 @@ on:
       - develop
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: stt-api
 
 jobs:

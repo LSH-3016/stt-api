@@ -43,7 +43,7 @@ async def websocket_stt_stream(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket STT 연결 시작")
     
-    region = os.getenv('AWS_REGION', 'us-east-1')
+    region = os.getenv('AWS_REGION', 'ap-northeast-2')
     
     try:
         # Transcribe Streaming 클라이언트 생성

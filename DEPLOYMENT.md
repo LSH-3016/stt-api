@@ -27,12 +27,12 @@ cat > trust-policy.json <<EOF
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::324547056370:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/YOUR_OIDC_ID"
+        "Federated": "arn:aws:iam::324547056370:oidc-provider/oidc.eks.ap-northeast-2.amazonaws.com/id/YOUR_OIDC_ID"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "oidc.eks.us-east-1.amazonaws.com/id/YOUR_OIDC_ID:sub": "system:serviceaccount:default:stt-api-sa"
+          "oidc.eks.ap-northeast-2.amazonaws.com/id/YOUR_OIDC_ID:sub": "system:serviceaccount:default:stt-api-sa"
         }
       }
     }
@@ -45,17 +45,56 @@ aws iam create-role \
   --role-name stt-api-secrets-role \
   --assume-role-policy-document file://trust-policy.json
 
-# Bedrock 권한 추가
+# Transcribe 및 S3 권한 정책 생성
+cat > stt-api-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "transcribe:StartStreamTranscription",
+        "transcribe:StartTranscriptionJob",
+        "transcribe:GetTranscriptionJob",
+        "transcribe:DeleteTranscriptionJob"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::stt-audio-324547056370/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::stt-audio-324547056370"
+    }
+  ]
+}
+EOF
+
+# 정책 생성 및 Role에 연결
+aws iam create-policy \
+  --policy-name stt-api-policy \
+  --policy-document file://stt-api-policy.json
+
 aws iam attach-role-policy \
   --role-name stt-api-secrets-role \
-  --policy-arn arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+  --policy-arn arn:aws:iam::324547056370:policy/stt-api-policy
 ```
 
 #### ECR 저장소 생성
 ```bash
 aws ecr create-repository \
   --repository-name stt-api \
-  --region us-east-1
+  --region ap-northeast-2
 ```
 
 ### 2. Docker 이미지 빌드 및 푸시
@@ -79,16 +118,16 @@ git push origin main
 
 ```bash
 # ECR 로그인
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 324547056370.dkr.ecr.us-east-1.amazonaws.com
+aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin 324547056370.dkr.ecr.ap-northeast-2.amazonaws.com
 
 # 이미지 빌드
 docker build -t stt-api:latest .
 
 # 이미지 태그
-docker tag stt-api:latest 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:latest
+docker tag stt-api:latest 324547056370.dkr.ecr.ap-northeast-2.amazonaws.com/stt-api:latest
 
 # 이미지 푸시
-docker push 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:latest
+docker push 324547056370.dkr.ecr.ap-northeast-2.amazonaws.com/stt-api:latest
 ```
 
 ### 3. Route53 DNS 설정
@@ -192,11 +231,11 @@ curl -X POST "https://api.aws11.shop/stt/transcribe" \
 ```bash
 # 1. 새 이미지 빌드 및 푸시
 docker build -t stt-api:v2 .
-docker tag stt-api:v2 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v2
-docker push 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v2
+docker tag stt-api:v2 324547056370.dkr.ecr.ap-northeast-2.amazonaws.com/stt-api:v2
+docker push 324547056370.dkr.ecr.ap-northeast-2.amazonaws.com/stt-api:v2
 
 # 2. Deployment 이미지 업데이트
-kubectl set image deployment/stt-api stt-api=324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v2
+kubectl set image deployment/stt-api stt-api=324547056370.dkr.ecr.ap-northeast-2.amazonaws.com/stt-api:v2
 
 # 3. 롤아웃 상태 확인
 kubectl rollout status deployment/stt-api
@@ -267,18 +306,17 @@ kubectl describe sa stt-api-sa
 # 4. OIDC Provider 확인
 aws eks describe-cluster --name <cluster-name> --query "cluster.identity.oidc.issuer"
 
-# 5. Bedrock 권한 테스트 (Pod 내부에서)
+# 5. Transcribe 권한 테스트 (Pod 내부에서)
 kubectl exec -it <pod-name> -- python3 -c "
 import boto3
-client = boto3.client('bedrock-runtime', region_name='us-east-1')
-print('Bedrock client initialized successfully')
+client = boto3.client('transcribe', region_name='ap-northeast-2')
+print('Transcribe client initialized successfully')
 "
 
 # 일반적인 원인:
 # - IAM Role의 Trust Policy가 잘못됨 (OIDC Provider ID 불일치)
-# - Bedrock 권한이 없음 (AmazonBedrockFullAccess 필요)
+# - Transcribe Streaming 권한이 없음
 # - ServiceAccount annotation이 잘못됨
-# - AWS Region이 Bedrock을 지원하지 않음 (us-east-1 권장)
 ```
 
 ### Pod가 시작되지 않을 때
@@ -302,7 +340,7 @@ kubectl describe ingress stt-api-ingress
 kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
 
 # ALB 생성 확인
-aws elbv2 describe-load-balancers --region us-east-1
+aws elbv2 describe-load-balancers --region ap-northeast-2
 ```
 
 ### 503 에러 발생 시

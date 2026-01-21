@@ -75,51 +75,7 @@ ws.onmessage = (event) => {
 
 ---
 
-### 2. 파일 업로드 STT
-
-음성 파일을 텍스트로 변환합니다.
-
-**URL**: `POST /stt/transcribe`
-
-**Content-Type**: `multipart/form-data`
-
-**파라미터**:
-| 필드 | 타입 | 필수 | 설명 |
-|------|------|------|------|
-| audio | file | O | 음성 파일 |
-
-**지원 포맷**: WAV, MP3, OGG, FLAC, M4A, WEBM
-
-**제한사항**:
-- 최대 파일 크기: 5MB
-- Rate Limit: 10회/분
-- 타임아웃: 30초
-
-**요청 예시**:
-```bash
-curl -X POST "https://stt.aws11.shop/stt/transcribe" \
-  -F "audio=@voice.wav"
-```
-
-**응답**:
-```json
-{
-  "text": "변환된 텍스트",
-  "language": "ko-KR"
-}
-```
-
-**에러 응답**:
-| 코드 | 설명 |
-|------|------|
-| 400 | 지원하지 않는 파일 형식 / 빈 파일 |
-| 413 | 파일 크기 초과 (5MB) |
-| 429 | Rate Limit 초과 |
-| 504 | 변환 타임아웃 |
-
----
-
-### 3. Health Check
+### 2. Health Check
 
 **URL**: `GET /health` 또는 `GET /stt/health`
 

@@ -11,12 +11,6 @@
 │  Frontend   │ ◄───────────────► │  STT API    │ ◄───────────────► │ Amazon Transcribe   │
 │  (React)    │   PCM 16kHz       │  (FastAPI)  │                   │ Streaming           │
 └─────────────┘                   └─────────────┘                   └─────────────────────┘
-                                        │
-                                        │ 파일 업로드
-                                        ▼
-                                  ┌─────────────┐
-                                  │     S3      │
-                                  └─────────────┘
 ```
 
 ## 기술 스택
@@ -25,11 +19,10 @@
 |------|------|
 | Backend | FastAPI, Python 3.11 |
 | STT Engine | Amazon Transcribe Streaming |
-| Storage | Amazon S3 (파일 업로드용) |
 | Container | Docker |
 | Orchestration | Amazon EKS |
 | CI/CD | GitHub Actions + ArgoCD |
-| Infrastructure | AWS (EKS, ECR, S3, IAM) |
+| Infrastructure | AWS (EKS, ECR, IAM) |
 
 ## 프로젝트 구조
 
@@ -54,15 +47,11 @@ stt-api/
 
 ## 핵심 기능
 
-### 1. 실시간 STT (WebSocket)
+### 실시간 STT (WebSocket)
 - 브라우저에서 마이크 입력을 실시간으로 텍스트 변환
 - Partial results로 말하는 중에도 텍스트 표시
 - 16kHz PCM 오디오 스트리밍
-
-### 2. 파일 업로드 STT
-- WAV, MP3 등 오디오 파일 업로드
-- S3 임시 저장 후 Transcribe 배치 처리
-- 최대 5MB, 30초 타임아웃
+- 파일 업로드 없이 순수 스트리밍만 지원
 
 ## 데이터 흐름
 
@@ -72,13 +61,6 @@ stt-api/
 3. 백엔드에서 Transcribe Streaming으로 전달
 4. Partial/Final 결과를 WebSocket으로 실시간 응답
 5. 프론트엔드에서 텍스트 표시 (partial은 덮어쓰기)
-
-### 파일 업로드 STT
-1. 프론트엔드에서 파일 업로드
-2. 백엔드에서 S3에 임시 저장
-3. Transcribe 배치 작업 시작
-4. 완료 대기 후 결과 반환
-5. S3 파일 및 작업 정리
 
 ## 배포 파이프라인
 
@@ -97,18 +79,13 @@ Git Push → GitHub Actions → ECR Push → ArgoCD Sync → EKS Deploy
 |--------|----------|
 | EKS Cluster | fproject-dev-eks |
 | ECR Repository | stt-api |
-| S3 Bucket | stt-audio-324547056370 |
 | IAM Role (IRSA) | stt-api-secrets-role |
 | IAM Role (Node) | fproject-dev-eks-node-role |
 
 ## IAM 권한
 
 ### stt-api-secrets-role (IRSA)
-- `transcribe:StartStreamTranscription`
-- `transcribe:StartTranscriptionJob`
-- `transcribe:GetTranscriptionJob`
-- `transcribe:DeleteTranscriptionJob`
-- `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`
+- `transcribe:StartStreamTranscription` (실시간 스트리밍만 사용)
 
 ## 환경별 설정
 
