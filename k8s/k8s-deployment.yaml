@@ -16,6 +16,8 @@ spec:
         app: stt-api
     spec:
       serviceAccountName: stt-api-sa
+      nodeSelector:
+        karpenter.sh/nodepool: default
       containers:
       - name: stt-api
         image: 324547056370.dkr.ecr.us-east-1.amazonaws.com/stt-api:v17
@@ -23,7 +25,7 @@ spec:
         - containerPort: 8000
         env:
         - name: AWS_REGION
-          value: "us-east-1"
+          value: "ap-northeast-2"
         - name: ALLOWED_ORIGINS
           value: "https://www.aws11.shop,https://aws11.shop,https://stt.aws11.shop,https://api.aws11.shop"
         - name: DEBUG

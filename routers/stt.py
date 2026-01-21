@@ -1,26 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect, Request
-from typing import Optional
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 import logging
-import json
-import tempfile
 import os
-import time
 import asyncio
-
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent
 
-from schemas.stt import STTResponse
-from services.stt import stt_service
-
 router = APIRouter(prefix="/stt", tags=["STT (Speech-to-Text)"])
 logger = logging.getLogger(__name__)
-
-limiter = Limiter(key_func=get_remote_address)
 
 class WebSocketTranscriptHandler(TranscriptResultStreamHandler):
     """Transcribe 결과를 WebSocket으로 실시간 전송하는 핸들러"""
@@ -100,61 +88,7 @@ async def websocket_stt_stream(websocket: WebSocket):
             pass
         await websocket.close()
 
-@router.post("/transcribe", response_model=STTResponse)
-@limiter.limit("10/minute")
-async def transcribe_audio(
-    request: Request,
-    audio: UploadFile = File(..., description="음성 파일 (wav, mp3, ogg 등)")
-):
-    """음성 파일을 텍스트로 변환"""
-    MAX_FILE_SIZE = 5 * 1024 * 1024
-    allowed_extensions = {'.wav', '.mp3', '.ogg', '.flac', '.m4a', '.webm'}
-    file_ext = os.path.splitext(audio.filename or '.wav')[1].lower()
-    
-    if file_ext not in allowed_extensions:
-        raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식입니다.")
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
-        total_size = 0
-        try:
-            while chunk := await audio.read(8192):
-                total_size += len(chunk)
-                if total_size > MAX_FILE_SIZE:
-                    os.unlink(temp_file.name)
-                    raise HTTPException(status_code=413, detail="파일이 너무 큽니다.")
-                temp_file.write(chunk)
-            
-            if total_size == 0:
-                os.unlink(temp_file.name)
-                raise HTTPException(status_code=400, detail="빈 파일입니다.")
-            
-            temp_path = temp_file.name
-        except HTTPException:
-            raise
-        except Exception as e:
-            if os.path.exists(temp_file.name):
-                os.unlink(temp_file.name)
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    try:
-        content_type = audio.content_type or "audio/wav"
-        logger.info(f"STT 요청: {audio.filename}, {total_size} bytes")
-        
-        with open(temp_path, 'rb') as f:
-            audio_data = f.read()
-            result = await asyncio.wait_for(
-                stt_service.transcribe_file(audio_data, content_type),
-                timeout=30.0
-            )
-        
-        return STTResponse(**result)
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="변환 시간 초과")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
+
 
 @router.get("/health")
 async def stt_health_check():
