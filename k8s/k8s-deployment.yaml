@@ -20,7 +20,7 @@ spec:
         karpenter.sh/nodepool: default
       containers:
       - name: stt-api
-        image: 324547056370.dkr.ecr.ap-northeast-2.amazonaws.com/stt-api:v26
+        image: 324547056370.dkr.ecr.ap-northeast-2.amazonaws.com/stt-api:v27
         ports:
         - containerPort: 8000
         env:
