@@ -47,15 +47,8 @@ async def websocket_stt_stream(websocket: WebSocket):
     region = os.getenv('AWS_REGION', 'ap-northeast-2')
     
     try:
-        # boto3 세션 생성 (IRSA credential 사용)
-        session = boto3.Session()
-        credentials = session.get_credentials()
-        
-        # Transcribe Streaming 클라이언트 생성
-        client = TranscribeStreamingClient(
-            region=region,
-            credential_resolver=lambda: credentials
-        )
+        # Transcribe Streaming 클라이언트 생성 (boto3가 자동으로 IRSA credential 사용)
+        client = TranscribeStreamingClient(region=region)
         
         # 스트림 시작
         stream = await client.start_stream_transcription(
