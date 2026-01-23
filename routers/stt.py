@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 import logging
 import os
 import asyncio
+import boto3
 
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
@@ -46,8 +47,15 @@ async def websocket_stt_stream(websocket: WebSocket):
     region = os.getenv('AWS_REGION', 'ap-northeast-2')
     
     try:
+        # boto3 세션 생성 (IRSA credential 사용)
+        session = boto3.Session()
+        credentials = session.get_credentials()
+        
         # Transcribe Streaming 클라이언트 생성
-        client = TranscribeStreamingClient(region=region)
+        client = TranscribeStreamingClient(
+            region=region,
+            credential_resolver=lambda: credentials
+        )
         
         # 스트림 시작
         stream = await client.start_stream_transcription(
