@@ -32,6 +32,14 @@ spec:
           value: "False"
         - name: ENVIRONMENT
           value: "production"
+        - name: OTEL_SERVICE_NAME
+          value: "stt-api"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://jaeger-collector.istio-system.svc.cluster.local:4317"
+        - name: APP_VERSION
+          value: "1.0.0"
+        - name: ENV
+          value: "production"
         livenessProbe:
           httpGet:
             path: /health
